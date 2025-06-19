@@ -143,6 +143,7 @@ impl Config {
             component_model_async_builtins,
             component_model_async_stackful,
             component_model_error_context,
+            component_model_gc,
             simd,
             exceptions,
             legacy_exceptions,
@@ -150,6 +151,8 @@ impl Config {
             hogs_memory: _,
             nan_canonicalization: _,
             gc_types: _,
+            stack_switching: _,
+            spec_test: _,
         } = test.config;
 
         // Enable/disable some proposals that aren't configurable in wasm-smith
@@ -164,6 +167,7 @@ impl Config {
         self.module_config.component_model_error_context =
             component_model_error_context.unwrap_or(false);
         self.module_config.legacy_exceptions = legacy_exceptions.unwrap_or(false);
+        self.module_config.component_model_gc = component_model_gc.unwrap_or(false);
 
         // Enable/disable proposals that wasm-smith has knobs for which will be
         // read when creating `wasmtime::Config`.

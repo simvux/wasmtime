@@ -2,6 +2,13 @@
 //!
 //! This crate provides an implementation of the `wasmtime_environ::Compiler`
 //! and `wasmtime_environ::CompilerBuilder` traits.
+//!
+//! > **⚠️ Warning ⚠️**: this crate is an internal-only crate for the Wasmtime
+//! > project and is not intended for general use. APIs are not strictly
+//! > reviewed for safety and usage outside of Wasmtime may have bugs. If
+//! > you're interested in using this feel free to file an issue on the
+//! > Wasmtime repository to start a discussion about doing so, but otherwise
+//! > be aware that your usage of this crate is not supported.
 
 // See documentation in crates/wasmtime/src/runtime.rs for why this is
 // selectively enabled here.
@@ -61,6 +68,10 @@ pub const TRAP_HEAP_MISALIGNED: TrapCode =
     TrapCode::unwrap_user(Trap::HeapMisaligned as u8 + TRAP_OFFSET);
 pub const TRAP_TABLE_OUT_OF_BOUNDS: TrapCode =
     TrapCode::unwrap_user(Trap::TableOutOfBounds as u8 + TRAP_OFFSET);
+pub const TRAP_UNHANDLED_TAG: TrapCode =
+    TrapCode::unwrap_user(Trap::UnhandledTag as u8 + TRAP_OFFSET);
+pub const TRAP_CONTINUATION_ALREADY_CONSUMED: TrapCode =
+    TrapCode::unwrap_user(Trap::ContinuationAlreadyConsumed as u8 + TRAP_OFFSET);
 pub const TRAP_CAST_FAILURE: TrapCode =
     TrapCode::unwrap_user(Trap::CastFailure as u8 + TRAP_OFFSET);
 
@@ -202,7 +213,11 @@ fn reference_type(wasm_ht: WasmHeapType, pointer_type: ir::Type) -> ir::Type {
     match wasm_ht.top() {
         WasmHeapTopType::Func => pointer_type,
         WasmHeapTopType::Any | WasmHeapTopType::Extern => ir::types::I32,
-        WasmHeapTopType::Cont => todo!(), // FIXME: #10248 stack switching support.
+        WasmHeapTopType::Cont =>
+        // TODO(10248) This is added in a follow-up PR
+        {
+            unimplemented!("codegen for stack switching types not implemented, yet")
+        }
     }
 }
 

@@ -14,6 +14,7 @@ use cranelift_codegen::ir::types::*;
 use cranelift_codegen::ir::{self, types};
 use cranelift_codegen::ir::{ArgumentPurpose, ConstantData, Function, InstBuilder, MemFlags};
 use cranelift_codegen::isa::{TargetFrontendConfig, TargetIsa};
+use cranelift_entity::packed_option::ReservedValue;
 use cranelift_entity::{EntityRef, PrimaryMap, SecondaryMap};
 use cranelift_frontend::Variable;
 use cranelift_frontend::{FuncInstBuilder, FunctionBuilder};
@@ -215,9 +216,9 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
             builtin_functions,
             offsets: VMOffsets::new(compiler.isa().pointer_bytes(), &translation.module),
             tunables,
-            fuel_var: Variable::new(0),
-            epoch_deadline_var: Variable::new(0),
-            epoch_ptr_var: Variable::new(0),
+            fuel_var: Variable::reserved_value(),
+            epoch_deadline_var: Variable::reserved_value(),
+            epoch_ptr_var: Variable::reserved_value(),
 
             // Start with at least one fuel being consumed because even empty
             // functions should consume at least some fuel.
@@ -352,7 +353,8 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         // `self.fuel_var` to make fuel modifications fast locally. This cache
         // is then periodically flushed to the Store-defined location in
         // `VMStoreContext` later.
-        builder.declare_var(self.fuel_var, ir::types::I64);
+        debug_assert!(self.fuel_var.is_reserved_value());
+        self.fuel_var = builder.declare_var(ir::types::I64);
         self.fuel_load_into_var(builder);
         self.fuel_check(builder);
     }
@@ -565,10 +567,12 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
     }
 
     fn epoch_function_entry(&mut self, builder: &mut FunctionBuilder<'_>) {
-        builder.declare_var(self.epoch_deadline_var, ir::types::I64);
+        debug_assert!(self.epoch_deadline_var.is_reserved_value());
+        self.epoch_deadline_var = builder.declare_var(ir::types::I64);
         // Let epoch_check_full load the current deadline and call def_var
 
-        builder.declare_var(self.epoch_ptr_var, self.pointer_type());
+        debug_assert!(self.epoch_ptr_var.is_reserved_value());
+        self.epoch_ptr_var = builder.declare_var(self.pointer_type());
         let epoch_ptr = self.epoch_ptr(builder);
         builder.def_var(self.epoch_ptr_var, epoch_ptr);
 
@@ -1804,12 +1808,6 @@ impl FuncEnvironment<'_> {
         wasm_func_ty.returns()[index].is_vmgcref_type_and_not_i31()
     }
 
-    pub fn after_locals(&mut self, num_locals: usize) {
-        self.fuel_var = Variable::new(num_locals);
-        self.epoch_deadline_var = Variable::new(num_locals + 1);
-        self.epoch_ptr_var = Variable::new(num_locals + 2);
-    }
-
     pub fn translate_table_grow(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
@@ -2252,10 +2250,11 @@ impl FuncEnvironment<'_> {
     pub fn translate_ref_test(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
-        ref_ty: WasmRefType,
+        test_ty: WasmRefType,
         gc_ref: ir::Value,
+        gc_ref_ty: WasmRefType,
     ) -> WasmResult<ir::Value> {
-        gc::translate_ref_test(self, builder, ref_ty, gc_ref)
+        gc::translate_ref_test(self, builder, test_ty, gc_ref, gc_ref_ty)
     }
 
     pub fn translate_ref_null(
@@ -2275,7 +2274,14 @@ impl FuncEnvironment<'_> {
         &mut self,
         mut pos: cranelift_codegen::cursor::FuncCursor,
         value: ir::Value,
+        ty: WasmRefType,
     ) -> WasmResult<ir::Value> {
+        // If we know the type is not nullable, then we don't actually need to
+        // check for null.
+        if !ty.nullable {
+            return Ok(pos.ins().iconst(ir::types::I32, 0));
+        }
+
         let byte_is_null =
             pos.ins()
                 .icmp_imm(cranelift_codegen::ir::condcodes::IntCC::Equal, value, 0);
@@ -3123,6 +3129,7 @@ impl FuncEnvironment<'_> {
     pub fn before_translate_operator(
         &mut self,
         op: &Operator,
+        _operand_types: Option<&[WasmValType]>,
         builder: &mut FunctionBuilder,
         state: &FuncTranslationState,
     ) -> WasmResult<()> {
@@ -3135,6 +3142,7 @@ impl FuncEnvironment<'_> {
     pub fn after_translate_operator(
         &mut self,
         op: &Operator,
+        _operand_types: Option<&[WasmValType]>,
         builder: &mut FunctionBuilder,
         state: &FuncTranslationState,
     ) -> WasmResult<()> {
@@ -3792,4 +3800,18 @@ fn index_type_to_ir_type(index_type: IndexType) -> ir::Type {
         IndexType::I32 => I32,
         IndexType::I64 => I64,
     }
+}
+
+/// TODO(10248) This is removed in the next stack switching PR. It stops the
+/// compiler from complaining about the stack switching libcalls being dead
+/// code.
+#[cfg(feature = "stack-switching")]
+#[allow(
+    dead_code,
+    reason = "Dummy function to supress more dead code warnings"
+)]
+pub fn use_stack_switching_libcalls() {
+    let _ = BuiltinFunctions::cont_new;
+    let _ = BuiltinFunctions::table_grow_cont_obj;
+    let _ = BuiltinFunctions::table_fill_cont_obj;
 }

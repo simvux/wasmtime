@@ -27,6 +27,9 @@ use core::ops::Range;
 use core::ptr::{self, NonNull};
 
 pub use self::backtrace::Backtrace;
+#[cfg(feature = "gc")]
+pub use wasmtime_unwinder::Frame;
+
 pub use self::coredump::CoreDumpStack;
 pub use self::tls::tls_eager_initialize;
 #[cfg(feature = "async")]
@@ -305,6 +308,14 @@ unsafe impl HostResultHasUnwindSentinel for core::convert::Infallible {
     }
 }
 
+unsafe impl HostResultHasUnwindSentinel for bool {
+    type Abi = u32;
+    const SENTINEL: Self::Abi = u32::MAX;
+    fn into_abi(self) -> Self::Abi {
+        u32::from(self)
+    }
+}
+
 /// Stores trace message with backtrace.
 #[derive(Debug)]
 pub struct Trap {
@@ -430,7 +441,7 @@ where
 mod call_thread_state {
     use super::*;
     use crate::EntryStoreContext;
-    use crate::runtime::vm::Unwind;
+    use crate::runtime::vm::{Unwind, VMStackChain};
 
     /// Temporary state stored on the stack which is registered in the `tls`
     /// module below for calls into wasm.
@@ -530,6 +541,11 @@ mod call_thread_state {
         /// Get the saved FP upon entry into Wasm for the previous `CallThreadState`.
         pub unsafe fn old_last_wasm_entry_fp(&self) -> usize {
             (&*self.old_state).last_wasm_entry_fp
+        }
+
+        /// Get the saved `VMStackChain` for the previous `CallThreadState`.
+        pub unsafe fn old_stack_chain(&self) -> VMStackChain {
+            (&*self.old_state).stack_chain.clone()
         }
 
         /// Get the previous `CallThreadState`.

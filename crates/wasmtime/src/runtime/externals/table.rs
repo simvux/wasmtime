@@ -30,7 +30,7 @@ pub struct Table {
 // representation here in terms of size/alignment/etc.
 const _: () = {
     #[repr(C)]
-    struct Tmp(u64, usize);
+    struct Tmp(u64, u32);
     #[repr(C)]
     struct C(Tmp, u32);
     assert!(core::mem::size_of::<C>() == core::mem::size_of::<Table>());
@@ -195,6 +195,11 @@ impl Table {
                         }
                         ty => unreachable!("not a top type: {ty:?}"),
                     }
+                }
+
+                runtime::TableElement::ContRef(_c) => {
+                    // TODO(#10248) Required to support stack switching in the embedder API.
+                    unimplemented!()
                 }
             }
         }

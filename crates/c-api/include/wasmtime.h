@@ -205,6 +205,7 @@
 #include <wasmtime/val.h>
 #include <wasmtime/async.h>
 #include <wasmtime/component.h>
+#include <wasmtime/wasip2.h>
 #include <wasmtime/wat.h>
 // IWYU pragma: end_exports
 // clang-format on
@@ -212,11 +213,11 @@
 /**
  * \brief Wasmtime version string.
  */
-#define WASMTIME_VERSION "34.0.0"
+#define WASMTIME_VERSION "35.0.0"
 /**
  * \brief Wasmtime major version number.
  */
-#define WASMTIME_VERSION_MAJOR 34
+#define WASMTIME_VERSION_MAJOR 35
 /**
  * \brief Wasmtime minor version number.
  */

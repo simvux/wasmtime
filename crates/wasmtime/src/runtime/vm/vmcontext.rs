@@ -7,6 +7,7 @@ pub use self::vm_host_func_context::VMArrayCallHostFuncContext;
 use crate::prelude::*;
 use crate::runtime::vm::{GcStore, InterpreterRef, VMGcRef, VmPtr, VmSafe, f32x4, f64x2, i8x16};
 use crate::store::StoreOpaque;
+use crate::vm::stack_switching::VMStackChain;
 use core::cell::UnsafeCell;
 use core::ffi::c_void;
 use core::fmt;
@@ -43,7 +44,7 @@ use wasmtime_environ::{
 /// * `false` if this call failed and a trap was recorded in TLS.
 pub type VMArrayCallNative = unsafe extern "C" fn(
     NonNull<VMOpaqueContext>,
-    NonNull<VMOpaqueContext>,
+    NonNull<VMContext>,
     NonNull<ValRaw>,
     usize,
 ) -> bool;
@@ -546,7 +547,7 @@ impl VMGlobalDefinition {
                     global.init_gc_ref(store.gc_store_mut()?, r.as_ref())
                 }
                 WasmHeapTopType::Func => *global.as_func_ref_mut() = raw.get_funcref().cast(),
-                WasmHeapTopType::Cont => todo!(), // FIXME: #10248 stack switching support.
+                WasmHeapTopType::Cont => *global.as_func_ref_mut() = raw.get_funcref().cast(), // TODO(#10248): temporary hack.
             },
         }
         Ok(global)
@@ -868,34 +869,34 @@ impl VMFuncRef {
     /// exhaustively documented.
     #[inline]
     pub unsafe fn array_call(
-        &self,
+        me: NonNull<VMFuncRef>,
         pulley: Option<InterpreterRef<'_>>,
-        caller: NonNull<VMOpaqueContext>,
+        caller: NonNull<VMContext>,
         args_and_results: NonNull<[ValRaw]>,
     ) -> bool {
         match pulley {
-            Some(vm) => self.array_call_interpreted(vm, caller, args_and_results),
-            None => self.array_call_native(caller, args_and_results),
+            Some(vm) => Self::array_call_interpreted(me, vm, caller, args_and_results),
+            None => Self::array_call_native(me, caller, args_and_results),
         }
     }
 
     unsafe fn array_call_interpreted(
-        &self,
+        me: NonNull<VMFuncRef>,
         vm: InterpreterRef<'_>,
-        caller: NonNull<VMOpaqueContext>,
+        caller: NonNull<VMContext>,
         args_and_results: NonNull<[ValRaw]>,
     ) -> bool {
         // If `caller` is actually a `VMArrayCallHostFuncContext` then skip the
         // interpreter, even though it's available, as `array_call` will be
         // native code.
-        if self.vmctx.as_non_null().as_ref().magic
+        if me.as_ref().vmctx.as_non_null().as_ref().magic
             == wasmtime_environ::VM_ARRAY_CALL_HOST_FUNC_MAGIC
         {
-            return self.array_call_native(caller, args_and_results);
+            return Self::array_call_native(me, caller, args_and_results);
         }
         vm.call(
-            self.array_call.as_non_null().cast(),
-            self.vmctx.as_non_null(),
+            me.as_ref().array_call.as_non_null().cast(),
+            me.as_ref().vmctx.as_non_null(),
             caller,
             args_and_results,
         )
@@ -903,8 +904,8 @@ impl VMFuncRef {
 
     #[inline]
     unsafe fn array_call_native(
-        &self,
-        caller: NonNull<VMOpaqueContext>,
+        me: NonNull<VMFuncRef>,
+        caller: NonNull<VMContext>,
         args_and_results: NonNull<[ValRaw]>,
     ) -> bool {
         union GetNativePointer {
@@ -912,11 +913,11 @@ impl VMFuncRef {
             ptr: NonNull<VMArrayCallFunction>,
         }
         let native = GetNativePointer {
-            ptr: self.array_call.as_non_null(),
+            ptr: me.as_ref().array_call.as_non_null(),
         }
         .native;
         native(
-            self.vmctx.as_non_null(),
+            me.as_ref().vmctx.as_non_null(),
             caller,
             args_and_results.cast(),
             args_and_results.len(),
@@ -1109,6 +1110,10 @@ pub struct VMStoreContext {
     /// Used to find the end of a contiguous sequence of Wasm frames when
     /// walking the stack.
     pub last_wasm_entry_fp: UnsafeCell<usize>,
+
+    /// Stack information used by stack switching instructions. See documentation
+    /// on `VMStackChain` for details.
+    pub stack_chain: UnsafeCell<VMStackChain>,
 }
 
 // The `VMStoreContext` type is a pod-type with no destructor, and we don't
@@ -1134,6 +1139,7 @@ impl Default for VMStoreContext {
             last_wasm_exit_fp: UnsafeCell::new(0),
             last_wasm_exit_pc: UnsafeCell::new(0),
             last_wasm_entry_fp: UnsafeCell::new(0),
+            stack_chain: UnsafeCell::new(VMStackChain::Absent),
         }
     }
 }
@@ -1184,6 +1190,10 @@ mod test_vmstore_context {
             offset_of!(VMStoreContext, last_wasm_entry_fp),
             usize::from(offsets.ptr.vmstore_context_last_wasm_entry_fp())
         );
+        assert_eq!(
+            offset_of!(VMStoreContext, stack_chain),
+            usize::from(offsets.ptr.vmstore_context_stack_chain())
+        )
     }
 }
 
@@ -1196,17 +1206,7 @@ mod test_vmstore_context {
 /// allocated at runtime.
 #[derive(Debug)]
 #[repr(C, align(16))] // align 16 since globals are aligned to that and contained inside
-pub struct VMContext {
-    /// There's some more discussion about this within `wasmtime/src/lib.rs` but
-    /// the idea is that we want to tell the compiler that this contains
-    /// pointers which transitively refers to itself, to suppress some
-    /// optimizations that might otherwise assume this doesn't exist.
-    ///
-    /// The self-referential pointer we care about is the `*mut Store` pointer
-    /// early on in this context, which if you follow through enough levels of
-    /// nesting, eventually can refer back to this `VMContext`
-    pub _marker: marker::PhantomPinned,
-}
+pub struct VMContext;
 
 impl VMContext {
     /// Helper function to cast between context types using a debug assertion to

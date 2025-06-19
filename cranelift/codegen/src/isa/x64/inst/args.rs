@@ -624,13 +624,6 @@ impl RegMemImm {
         Self::Imm { simm32 }
     }
 
-    /// Asserts that in register mode, the reg class is the one that's expected.
-    pub(crate) fn assert_regclass_is(&self, expected_reg_class: RegClass) {
-        if let Self::Reg { reg } = self {
-            debug_assert_eq!(reg.class(), expected_reg_class);
-        }
-    }
-
     /// Add the regs mentioned by `self` to `collector`.
     pub(crate) fn get_operands(&mut self, collector: &mut impl OperandVisitor) {
         match self {
@@ -729,20 +722,12 @@ impl PrettyPrint for RegMem {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
-/// Comparison operations.
-pub enum CmpOpcode {
-    /// CMP instruction: compute `a - b` and set flags from result.
-    Cmp,
-    /// TEST instruction: compute `a & b` and set flags from result.
-    Test,
-}
-
 #[derive(Debug)]
 pub(crate) enum InstructionSet {
     SSE,
     SSE2,
     CMPXCHG16b,
+    SSE3,
     SSSE3,
     SSE41,
     SSE42,
@@ -768,18 +753,7 @@ pub(crate) enum InstructionSet {
 pub enum SseOpcode {
     Blendvpd,
     Blendvps,
-    Comiss,
-    Comisd,
-    Cmpps,
-    Cmppd,
-    Cmpss,
-    Cmpsd,
-    Divps,
-    Divpd,
-    Divss,
-    Divsd,
     Insertps,
-    Movlhps,
     Pabsb,
     Pabsw,
     Pabsd,
@@ -801,18 +775,6 @@ pub enum SseOpcode {
     Pcmpgtq,
     Pmaddubsw,
     Pmaddwd,
-    Pmovsxbd,
-    Pmovsxbw,
-    Pmovsxbq,
-    Pmovsxwd,
-    Pmovsxwq,
-    Pmovsxdq,
-    Pmovzxbd,
-    Pmovzxbw,
-    Pmovzxbq,
-    Pmovzxwd,
-    Pmovzxwq,
-    Pmovzxdq,
     Pshufb,
     Pshufd,
     Ptest,
@@ -823,12 +785,9 @@ pub enum SseOpcode {
     Roundsd,
     Rsqrtss,
     Shufps,
-    Ucomiss,
-    Ucomisd,
     Pshuflw,
     Pshufhw,
     Pblendw,
-    Movddup,
 }
 
 impl SseOpcode {
@@ -836,23 +795,9 @@ impl SseOpcode {
     pub(crate) fn available_from(&self) -> InstructionSet {
         use InstructionSet::*;
         match self {
-            SseOpcode::Comiss
-            | SseOpcode::Cmpps
-            | SseOpcode::Cmpss
-            | SseOpcode::Divps
-            | SseOpcode::Divss
-            | SseOpcode::Movlhps
-            | SseOpcode::Rcpss
-            | SseOpcode::Rsqrtss
-            | SseOpcode::Shufps
-            | SseOpcode::Ucomiss => SSE,
+            SseOpcode::Rcpss | SseOpcode::Rsqrtss | SseOpcode::Shufps => SSE,
 
-            SseOpcode::Cmppd
-            | SseOpcode::Cmpsd
-            | SseOpcode::Comisd
-            | SseOpcode::Divpd
-            | SseOpcode::Divsd
-            | SseOpcode::Packssdw
+            SseOpcode::Packssdw
             | SseOpcode::Packsswb
             | SseOpcode::Packuswb
             | SseOpcode::Pavgb
@@ -865,7 +810,6 @@ impl SseOpcode {
             | SseOpcode::Pcmpgtd
             | SseOpcode::Pmaddwd
             | SseOpcode::Pshufd
-            | SseOpcode::Ucomisd
             | SseOpcode::Pshuflw
             | SseOpcode::Pshufhw => SSE2,
 
@@ -874,8 +818,7 @@ impl SseOpcode {
             | SseOpcode::Pabsd
             | SseOpcode::Palignr
             | SseOpcode::Pshufb
-            | SseOpcode::Pmaddubsw
-            | SseOpcode::Movddup => SSSE3,
+            | SseOpcode::Pmaddubsw => SSSE3,
 
             SseOpcode::Blendvpd
             | SseOpcode::Blendvps
@@ -883,18 +826,6 @@ impl SseOpcode {
             | SseOpcode::Packusdw
             | SseOpcode::Pblendvb
             | SseOpcode::Pcmpeqq
-            | SseOpcode::Pmovsxbd
-            | SseOpcode::Pmovsxbw
-            | SseOpcode::Pmovsxbq
-            | SseOpcode::Pmovsxwd
-            | SseOpcode::Pmovsxwq
-            | SseOpcode::Pmovsxdq
-            | SseOpcode::Pmovzxbd
-            | SseOpcode::Pmovzxbw
-            | SseOpcode::Pmovzxbq
-            | SseOpcode::Pmovzxwd
-            | SseOpcode::Pmovzxwq
-            | SseOpcode::Pmovzxdq
             | SseOpcode::Ptest
             | SseOpcode::Roundps
             | SseOpcode::Roundpd
@@ -915,21 +846,7 @@ impl SseOpcode {
 
     /// Is `src2` with this opcode a scalar, as for lane insertions?
     pub(crate) fn has_scalar_src2(self) -> bool {
-        match self {
-            SseOpcode::Pmovsxbw
-            | SseOpcode::Pmovsxbd
-            | SseOpcode::Pmovsxbq
-            | SseOpcode::Pmovsxwd
-            | SseOpcode::Pmovsxwq
-            | SseOpcode::Pmovsxdq => true,
-            SseOpcode::Pmovzxbw
-            | SseOpcode::Pmovzxbd
-            | SseOpcode::Pmovzxbq
-            | SseOpcode::Pmovzxwd
-            | SseOpcode::Pmovzxwq
-            | SseOpcode::Pmovzxdq => true,
-            _ => false,
-        }
+        false
     }
 }
 
@@ -938,18 +855,7 @@ impl fmt::Debug for SseOpcode {
         let name = match self {
             SseOpcode::Blendvpd => "blendvpd",
             SseOpcode::Blendvps => "blendvps",
-            SseOpcode::Cmpps => "cmpps",
-            SseOpcode::Cmppd => "cmppd",
-            SseOpcode::Cmpss => "cmpss",
-            SseOpcode::Cmpsd => "cmpsd",
-            SseOpcode::Comiss => "comiss",
-            SseOpcode::Comisd => "comisd",
-            SseOpcode::Divps => "divps",
-            SseOpcode::Divpd => "divpd",
-            SseOpcode::Divss => "divss",
-            SseOpcode::Divsd => "divsd",
             SseOpcode::Insertps => "insertps",
-            SseOpcode::Movlhps => "movlhps",
             SseOpcode::Pabsb => "pabsb",
             SseOpcode::Pabsw => "pabsw",
             SseOpcode::Pabsd => "pabsd",
@@ -971,19 +877,6 @@ impl fmt::Debug for SseOpcode {
             SseOpcode::Pcmpgtq => "pcmpgtq",
             SseOpcode::Pmaddubsw => "pmaddubsw",
             SseOpcode::Pmaddwd => "pmaddwd",
-
-            SseOpcode::Pmovsxbd => "pmovsxbd",
-            SseOpcode::Pmovsxbw => "pmovsxbw",
-            SseOpcode::Pmovsxbq => "pmovsxbq",
-            SseOpcode::Pmovsxwd => "pmovsxwd",
-            SseOpcode::Pmovsxwq => "pmovsxwq",
-            SseOpcode::Pmovsxdq => "pmovsxdq",
-            SseOpcode::Pmovzxbd => "pmovzxbd",
-            SseOpcode::Pmovzxbw => "pmovzxbw",
-            SseOpcode::Pmovzxbq => "pmovzxbq",
-            SseOpcode::Pmovzxwd => "pmovzxwd",
-            SseOpcode::Pmovzxwq => "pmovzxwq",
-            SseOpcode::Pmovzxdq => "pmovzxdq",
             SseOpcode::Pshufb => "pshufb",
             SseOpcode::Pshufd => "pshufd",
             SseOpcode::Ptest => "ptest",
@@ -994,12 +887,9 @@ impl fmt::Debug for SseOpcode {
             SseOpcode::Roundsd => "roundsd",
             SseOpcode::Rsqrtss => "rsqrtss",
             SseOpcode::Shufps => "shufps",
-            SseOpcode::Ucomiss => "ucomiss",
-            SseOpcode::Ucomisd => "ucomisd",
             SseOpcode::Pshuflw => "pshuflw",
             SseOpcode::Pshufhw => "pshufhw",
             SseOpcode::Pblendw => "pblendw",
-            SseOpcode::Movddup => "movddup",
         };
         write!(fmt, "{name}")
     }
@@ -1116,10 +1006,6 @@ impl AvxOpcode {
             | AvxOpcode::Vpcmpgtw
             | AvxOpcode::Vpcmpgtd
             | AvxOpcode::Vpcmpgtq
-            | AvxOpcode::Vblendvps
-            | AvxOpcode::Vblendvpd
-            | AvxOpcode::Vpblendvb
-            | AvxOpcode::Vmovlhps
             | AvxOpcode::Vpminsb
             | AvxOpcode::Vpminsw
             | AvxOpcode::Vpminsd
@@ -1139,10 +1025,6 @@ impl AvxOpcode {
             | AvxOpcode::Vpackuswb
             | AvxOpcode::Vpackusdw
             | AvxOpcode::Vpalignr
-            | AvxOpcode::Vpinsrb
-            | AvxOpcode::Vpinsrw
-            | AvxOpcode::Vpinsrd
-            | AvxOpcode::Vpinsrq
             | AvxOpcode::Vpmaddwd
             | AvxOpcode::Vpmaddubsw
             | AvxOpcode::Vinsertps
@@ -1176,23 +1058,12 @@ impl AvxOpcode {
             | AvxOpcode::Vmaxsd
             | AvxOpcode::Vsqrtps
             | AvxOpcode::Vsqrtpd
-            | AvxOpcode::Vroundpd
-            | AvxOpcode::Vroundps
-            | AvxOpcode::Vcvtdq2pd
-            | AvxOpcode::Vcvtdq2ps
-            | AvxOpcode::Vcvtpd2ps
-            | AvxOpcode::Vcvtps2pd
-            | AvxOpcode::Vcvttpd2dq
-            | AvxOpcode::Vcvttps2dq
             | AvxOpcode::Vphaddw
             | AvxOpcode::Vphaddd
             | AvxOpcode::Vpunpckldq
             | AvxOpcode::Vpunpckhdq
             | AvxOpcode::Vpunpcklqdq
             | AvxOpcode::Vpunpckhqdq
-            | AvxOpcode::Vpshuflw
-            | AvxOpcode::Vpshufhw
-            | AvxOpcode::Vpshufd
             | AvxOpcode::Vmovss
             | AvxOpcode::Vmovsd
             | AvxOpcode::Vmovups
@@ -1203,21 +1074,9 @@ impl AvxOpcode {
             | AvxOpcode::Vpextrd
             | AvxOpcode::Vpextrq
             | AvxOpcode::Vpblendw
-            | AvxOpcode::Vmovddup
             | AvxOpcode::Vbroadcastss
-            | AvxOpcode::Vmovd
-            | AvxOpcode::Vmovq
-            | AvxOpcode::Vmovmskps
-            | AvxOpcode::Vmovmskpd
-            | AvxOpcode::Vpmovmskb
-            | AvxOpcode::Vcvtsi2ss
-            | AvxOpcode::Vcvtsi2sd
-            | AvxOpcode::Vcvtss2sd
-            | AvxOpcode::Vcvtsd2ss
             | AvxOpcode::Vsqrtss
             | AvxOpcode::Vsqrtsd
-            | AvxOpcode::Vroundss
-            | AvxOpcode::Vroundsd
             | AvxOpcode::Vunpcklpd
             | AvxOpcode::Vptest
             | AvxOpcode::Vucomiss
@@ -1648,16 +1507,4 @@ impl OperandSize {
             Self::Size64 => I64,
         }
     }
-}
-
-/// An x64 memory fence kind.
-#[derive(Clone)]
-#[allow(dead_code)]
-pub enum FenceKind {
-    /// `mfence` instruction ("Memory Fence")
-    MFence,
-    /// `lfence` instruction ("Load Fence")
-    LFence,
-    /// `sfence` instruction ("Store Fence")
-    SFence,
 }

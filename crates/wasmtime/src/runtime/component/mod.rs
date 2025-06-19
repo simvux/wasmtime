@@ -117,7 +117,8 @@ mod values;
 pub use self::component::{Component, ComponentExportIndex};
 #[cfg(feature = "component-model-async")]
 pub use self::concurrent::{
-    ErrorContext, FutureReader, Promise, PromisesUnordered, StreamReader, VMComponentAsyncStore,
+    Accessor, ErrorContext, FutureReader, Promise, PromisesUnordered, StreamReader,
+    VMComponentAsyncStore,
 };
 pub use self::func::{
     ComponentNamedList, ComponentType, Func, Lift, Lower, TypedFunc, WasmList, WasmStr,
@@ -130,6 +131,7 @@ pub use self::resources::{Resource, ResourceAny};
 pub use self::types::{ResourceType, Type};
 pub use self::values::Val;
 
+pub(crate) use self::instance::RuntimeImport;
 pub(crate) use self::resources::HostResourceData;
 pub(crate) use self::store::ComponentInstanceId;
 
@@ -155,7 +157,10 @@ pub mod __internal {
     pub use alloc::vec::Vec;
     pub use anyhow;
     pub use core::cell::RefCell;
+    pub use core::future::Future;
     pub use core::mem::transmute;
+    #[cfg(feature = "component-model-async")]
+    pub use futures::future::FutureExt;
     #[cfg(feature = "async")]
     pub use trait_variant::make as trait_variant_make;
     pub use wasmtime_environ;

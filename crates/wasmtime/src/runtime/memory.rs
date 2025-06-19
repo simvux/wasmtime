@@ -26,8 +26,7 @@ impl fmt::Display for MemoryAccessError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for MemoryAccessError {}
+impl core::error::Error for MemoryAccessError {}
 
 /// A WebAssembly linear memory.
 ///
@@ -222,7 +221,7 @@ pub struct Memory {
 // representation here in terms of size/alignment/etc.
 const _: () = {
     #[repr(C)]
-    struct Tmp(u64, usize);
+    struct Tmp(u64, u32);
     #[repr(C)]
     struct C(Tmp, u32);
     assert!(core::mem::size_of::<C>() == core::mem::size_of::<Memory>());
@@ -640,7 +639,7 @@ impl Memory {
     }
 
     fn wasmtime_memory(&self, store: &mut StoreOpaque) -> *mut crate::runtime::vm::Memory {
-        store[self.instance].get_defined_memory(self.index)
+        self.instance.get_mut(store).get_defined_memory(self.index)
     }
 
     pub(crate) unsafe fn from_wasmtime_memory(

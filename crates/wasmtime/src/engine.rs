@@ -387,6 +387,24 @@ impl Engine {
                 }
             }
 
+            // stack switch model must match the current OS
+            "stack_switch_model" => {
+                if self.features().contains(WasmFeatures::STACK_SWITCHING) {
+                    use target_lexicon::OperatingSystem;
+                    let expected =
+                    match target.operating_system  {
+                        OperatingSystem::Windows => "update_windows_tib",
+                        OperatingSystem::Linux
+                        | OperatingSystem::MacOSX(_)
+                        | OperatingSystem::Darwin(_)  => "basic",
+                        _ => { return Err(String::from("stack-switching feature not supported on this platform")); }
+                    };
+                    *value == FlagValue::Enum(expected)
+                } else {
+                    return Ok(())
+                }
+            }
+
             // These settings don't affect the interface or functionality of
             // the module itself, so their configuration values shouldn't
             // matter.
@@ -405,7 +423,6 @@ impl Engine {
             | "log2_min_function_alignment"
             | "machine_code_cfg_info"
             | "tls_model" // wasmtime doesn't use tls right now
-            | "stack_switch_model" // wasmtime doesn't use stack switching right now
             | "opt_level" // opt level doesn't change semantics
             | "enable_alias_analysis" // alias analysis-based opts don't change semantics
             | "probestack_size_log2" // probestack above asserted disabled
@@ -671,12 +688,8 @@ impl Engine {
         self.inner.allocator.as_ref()
     }
 
-    pub(crate) fn gc_runtime(&self) -> Result<&Arc<dyn GcRuntime>> {
-        if let Some(rt) = &self.inner.gc_runtime {
-            Ok(rt)
-        } else {
-            bail!("no GC runtime: GC disabled at compile time or configuration time")
-        }
+    pub(crate) fn gc_runtime(&self) -> Option<&Arc<dyn GcRuntime>> {
+        self.inner.gc_runtime.as_ref()
     }
 
     pub(crate) fn profiler(&self) -> &dyn crate::profiling_agent::ProfilingAgent {
